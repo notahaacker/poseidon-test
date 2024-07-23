@@ -472,6 +472,7 @@ dependencies = [
  "rand",
  "rand_core",
  "rayon",
+ "serde",
  "static_assertions",
  "subtle",
 ]
@@ -721,9 +722,12 @@ dependencies = [
  "halo2-base",
  "halo2-ecc",
  "halo2curves",
+ "hex",
  "light-poseidon",
  "poseidon",
  "rand_core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,34 +1,101 @@
 use poseidon::Poseidon;
-use halo2curves::bn256::Fr;
+use halo2curves::{bn256::Fr, ff::Field};
+use rand_core::OsRng;
+use serde::Serialize;
+use serde_json::json;
+use hex::encode; 
+use halo2_base::halo2_proofs::halo2curves::bn256::G1Affine;
 
-fn main(){
+use std::fs::File;
+use std::io::Write;
+use std::time::Instant;
+
+#[derive(Serialize)]
+struct MerklePath {
+    input: String,
+    path: Vec<String>,
+    index: Vec<bool>,
+}
+
+fn fr_to_string(fr: &Fr) -> String {
+    let bytes = fr.to_bytes();
+    encode(bytes)
+}
+
+fn main() {
+
+    let inputs_start = Instant::now();
+    // 生成1024个随机输入
+    let inputs: Vec<Fr> = (0..16).map(|_| Fr::random(OsRng)).collect();
+    let duration = inputs_start.elapsed();
+    println!("Time to generate inputs: {:?}", duration);
+
+    let merkle_start = Instant::now();
+    // 存储Merkle树的叶子节点
+    let mut leaves = Vec::new();
+    for input in &inputs {
         let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
+        hasher.update(&[*input]);
+        leaves.push(hasher.squeeze());
+    }
+    let duration = merkle_start.elapsed();
+    println!("Time to generate leaves: {:?}", duration);
 
-        // let input1 = Fr::from_raw([0,1, 0 ,0]);//18446744073709551616
-        // let input1 = Fr::from_raw([0x91ce3e4f73b99dd7,0xa2666197ba092695, 0x7693e9224895572d ,0x08b209cf1122a4e8]);
-        let input1 = Fr::from(0);
-        let input2 = Fr::from(1);
 
-        println!("Input1: {:?}, Input2: {:?}", input1, input2);
-        // In sake of the example we generate some dummy scalar inputs
-        let inputs = vec![input1];
+    // 构建Merkle树并记录路径
+    let mut paths = Vec::new();
+    let mut level = leaves.clone();
+    let mut tree = vec![level.clone()];
 
-        // Feed inputs to the Absorption line
-        hasher.update(&inputs[..]);
+    let start = Instant::now();
+    while level.len() > 1 {
+        let mut next_level = Vec::new();
+        for chunk in level.chunks(2) {
+            let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
+            let (left, right) = (chunk[0], chunk.get(1).cloned().unwrap_or(chunk[0]));
+            hasher.update(&[left, right]);
+            next_level.push(hasher.squeeze());
+        }
+        level = next_level;
+        tree.push(level.clone());
+    }
+    let duration = start.elapsed();
+    println!("Time to build Merkle tree: {:?}", duration);
 
-        // Yield your challange with squeeze function
-        let hash1 = hasher.squeeze();
-        println!("Hash1: {:?}", hash1);
+    let root = tree.last().unwrap()[0];
 
-        let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
-        let inputs = vec![input2];
-        hasher.update(&inputs[..]);
-        let hash2 = hasher.squeeze();
-        println!("Hash2: {:?}", hash2);
+    let start = Instant::now();
+    for (i, input) in inputs.iter().enumerate() {
+        let mut path = Vec::new();
+        let mut index = Vec::new();
+        let mut position = i;
 
-        let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
-        let inputs = vec![hash1,hash2];
-        hasher.update(&inputs[..]);
-        let root = hasher.squeeze();
-        println!("Root: {:?}", root);
+        for level in &tree[..tree.len() - 1] {
+            let sibling_position = position ^ 1;
+            path.push(level.get(sibling_position).cloned().unwrap_or(level[position]));
+            index.push(position % 2 == 0); // true 表示左侧，false 表示右侧
+            position /= 2;
+        }
+
+        paths.push(MerklePath {
+            input: fr_to_string(input),
+            path: path.iter().map(fr_to_string).collect(),
+            index,
+        });
+    }
+    let duration = start.elapsed();
+    println!("Time to generate paths: {:?}", duration);
+
+    // 转换为JSON格式
+    let result = serde_json::to_string_pretty(&json!({
+        "root": fr_to_string(&root),
+        "leaves": paths,
+    })).unwrap();
+
+        // 将结果写入文件
+    let mut file = File::create("merkle_tree_16.json").expect("Unable to create file");
+    file.write_all(result.as_bytes()).expect("Unable to write data");
+
+    println!("Data has been written to merkle_tree.json");
+//     println!("{}", result);
 }
