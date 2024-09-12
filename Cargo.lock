@@ -725,6 +725,7 @@ dependencies = [
  "hex",
  "light-poseidon",
  "poseidon",
+ "rand",
  "rand_core",
  "serde",
  "serde_json",
